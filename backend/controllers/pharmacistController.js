@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const nodemailer = require('nodemailer');
+const { autoCompleteExpiredPrescriptions } = require('../utils/prescriptionUtils');
 
 // Set up the Email Engine (Reusing your .env credentials)
 const transporter = nodemailer.createTransport({
@@ -69,6 +70,9 @@ exports.verifyOtpAndGetRecords = async (req, res) => {
         if (patient.current_otp !== otp || new Date(patient.otp_expires_at) < now) {
             return res.status(400).json({ message: 'Invalid or expired verification code.' });
         }
+
+        // Keep statuses up to date before showing them
+        await autoCompleteExpiredPrescriptions();
 
         // If OTP is correct, fetch their Active Prescriptions
         const [prescriptions] = await db.execute(`

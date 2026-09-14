@@ -1,5 +1,56 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
+import ReportCard from './ReportCard';
+
+// Small hover tooltip: wraps any element and shows a styled text box near it on hover.
+// placement: 'top' (default), 'bottom', or 'left' — use 'bottom'/'left' inside scrollable
+// containers where an upward tooltip would get clipped.
+function HoverTooltip({ text, children, placement = 'top' }) {
+  const [show, setShow] = useState(false);
+
+  const boxStyle = {
+    width: '240px',
+    zIndex: 1050,
+    fontSize: '0.8rem',
+    lineHeight: 1.5,
+    whiteSpace: 'normal'
+  };
+  const arrowStyle = { width: '10px', height: '10px' };
+
+  if (placement === 'left') {
+    Object.assign(boxStyle, { right: '115%', top: '50%', transform: 'translateY(-50%)' });
+    Object.assign(arrowStyle, { right: '-5px', top: '50%', transform: 'translateY(-50%) rotate(45deg)' });
+  } else if (placement === 'bottom') {
+    Object.assign(boxStyle, { top: '135%', left: '50%', transform: 'translateX(-50%)' });
+    Object.assign(arrowStyle, { top: '-5px', left: '50%', transform: 'translateX(-50%) rotate(45deg)' });
+  } else {
+    Object.assign(boxStyle, { bottom: '135%', left: '50%', transform: 'translateX(-50%)' });
+    Object.assign(arrowStyle, { bottom: '-5px', left: '50%', transform: 'translateX(-50%) rotate(45deg)' });
+  }
+
+  return (
+    <span
+      className="position-relative d-inline-flex align-items-center"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <span className="position-absolute bg-dark text-white rounded-3 shadow-lg p-3 fw-normal" style={boxStyle}>
+          {text}
+          <span className="position-absolute bg-dark" style={arrowStyle}></span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+const STATUS_EXPLANATIONS = {
+  Active: 'Prescribed by the doctor — not yet picked up from the pharmacy.',
+  Dispensed: 'Picked up from the pharmacy — the patient is currently taking this.',
+  Completed: 'The patient completed the full prescribed course.',
+  Stopped: 'This medication was discontinued early.'
+};
 
 function DoctorDashboard() {
   const [searchId, setSearchId] = useState('');
@@ -12,12 +63,12 @@ function DoctorDashboard() {
   const [medicineName, setMedicineName] = useState('');
   const [instructions, setInstructions] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  const [dosageForm, setDosageForm] = useState({
-  amount: '', days: '', morning: false, afternoon: false, night: false, meal: 'After Food'
-});
 
-  // NEW: AI States
+  const [dosageForm, setDosageForm] = useState({
+    amount: '', days: '', morning: false, afternoon: false, night: false, meal: 'After Food'
+  });
+
+  // AI States
   const [aiWarning, setAiWarning] = useState(null);
   const [isChecking, setIsChecking] = useState(false);
 
@@ -36,7 +87,7 @@ function DoctorDashboard() {
     try {
       const formattedId = searchId.trim().toUpperCase();
       const res = await axios.get(`http://localhost:5000/api/doctor/search-patient/${formattedId}`, { headers });
-      
+
       setPatientData(res.data.profile);
       setReports(res.data.reports);
       setPrescriptions(res.data.prescriptions);
@@ -45,18 +96,18 @@ function DoctorDashboard() {
     }
   };
 
-  // NEW: AI Interaction Check Function
+  // AI Interaction + Allergy Check
   const handleCheckInteraction = async () => {
     if (!medicineName.trim()) return;
-    
+
     setIsChecking(true);
     setAiWarning(null);
-    
+
     try {
       const currentMeds = prescriptions.filter(rx => rx.status === 'Active').map(rx => rx.medicine_name);
-      
-      const res = await axios.post('http://localhost:5000/api/doctor/check-interaction', 
-        { currentMedicines: currentMeds, newMedicine: medicineName }, 
+
+      const res = await axios.post('http://localhost:5000/api/doctor/check-interaction',
+        { currentMedicines: currentMeds, newMedicine: medicineName, allergies: patientData?.allergies || '' },
         { headers }
       );
 
@@ -72,44 +123,59 @@ function DoctorDashboard() {
     }
   };
 
-const handlePrescribe = async (e) => {
+  // Automatically re-run the safety check ~600ms after the doctor stops typing
+  useEffect(() => {
+    if (!medicineName.trim() || !patientData) {
+      setAiWarning(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      handleCheckInteraction();
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [medicineName, patientData]);
+
+  const handlePrescribe = async (e) => {
     e.preventDefault();
     if (!medicineName || !dosageForm.amount || !dosageForm.days) return alert('Medicine Name, Amount, and Days are required.');
-    
+
     setIsSubmitting(true);
     let times = [];
     if (dosageForm.morning) times.push('Morning');
     if (dosageForm.afternoon) times.push('Afternoon');
     if (dosageForm.night) times.push('Night');
-    const timeStr = times.length > 0 ? `(${times.join(', ')})` : '';    
-    
-    // UPDATED: Now includes the number of days in the final string!
+    const timeStr = times.length > 0 ? `(${times.join(', ')})` : '';
+
     const finalDosageString = `${dosageForm.amount} for ${dosageForm.days} days ${timeStr} - ${dosageForm.meal}`.trim();
 
     try {
-     await axios.post('http://localhost:5000/api/doctor/add-prescription', {
-  patient_id: patientData.id,
-  medicine_name: medicineName,
-  dosage: finalDosageString,
-  duration_days: Number(dosageForm.days),
-  instructions: instructions
-}, { headers });
-      
-      alert('Prescription successfully added to patient record!');
-      handleSearch(new Event('submit')); 
-      
+      await axios.post('http://localhost:5000/api/doctor/add-prescription', {
+        patient_id: patientData.id,
+        medicine_name: medicineName,
+        dosage: finalDosageString,
+        duration_days: Number(dosageForm.days),
+        instructions: instructions
+      }, { headers });
+
+      alert('Prescription successfully added to patient record! The patient has been notified.');
+      handleSearch(new Event('submit'));
+
       setMedicineName('');
       setInstructions('');
-      setAiWarning(null); 
+      setAiWarning(null);
       setDosageForm({ amount: '', days: '', morning: false, afternoon: false, night: false, meal: 'After Food' });
-    } catch (err) { alert('Failed to add prescription.'); } 
-    finally { setIsSubmitting(false); }
+    } catch (err) {
+      alert('Failed to add prescription.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleUpdateStatus = async (prescriptionId, newStatus) => {
     try {
-      await axios.put(`http://localhost:5000/api/doctor/update-prescription/${prescriptionId}`, 
-        { status: newStatus }, 
+      await axios.put(`http://localhost:5000/api/doctor/update-prescription/${prescriptionId}`,
+        { status: newStatus },
         { headers }
       );
       handleSearch(new Event('submit'));
@@ -120,9 +186,9 @@ const handlePrescribe = async (e) => {
 
   return (
     <div className="mt-4 text-start">
-      
+
       {/* Doctor Header Card */}
-      <div className="card shadow-sm border-0 rounded-4 mb-4 text-white overflow-hidden" style={{ background: 'linear-gradient(135deg, #2c3e50, #3498db)' }}>
+      <div className="card shadow-sm border-0 rounded-4 mb-4 text-white overflow-hidden" style={{ background: 'linear-gradient(135deg, var(--ink), var(--primary))' }}>
         <div className="card-body p-4 p-md-5 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
           <div>
             <p className="mb-1 text-white-50 fw-semibold text-uppercase tracking-wider small">Clinical Portal</p>
@@ -143,10 +209,10 @@ const handlePrescribe = async (e) => {
 
       {patientData && (
         <div className="row g-4 animate__animated animate__fadeIn">
-          
+
           {/* LEFT COLUMN: Patient Details, Reports & Medications */}
           <div className="col-lg-5 d-flex flex-column gap-4">
-            
+
             {/* Patient Profile Card */}
             <div className="card shadow-sm border-0 rounded-4 bg-light">
               <div className="card-body p-4">
@@ -179,50 +245,52 @@ const handlePrescribe = async (e) => {
               </div>
             </div>
 
-           {/* Medication History Module for Doctor */}
+            {/* Medication History Module for Doctor */}
             <div className="card shadow-sm border-0 rounded-4">
               <div className="card-body p-4">
                 <h5 className="fw-bold text-dark mb-3 border-bottom pb-2">Medication History</h5>
-                
+
                 {prescriptions.length === 0 ? (
                   <p className="text-muted small mb-0">No medication history found.</p>
                 ) : (
                   <div className="d-flex flex-column gap-3" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-{prescriptions.map(rx => {
-  const status = rx.status?.trim() || '';
+                    {prescriptions.map(rx => {
+                      const status = rx.status?.trim() || '';
 
-  const statusStyles = {
-    Active:     { card: 'border-success bg-success bg-opacity-10', text: 'text-success', select: 'bg-success text-white border-success' },
-    Dispensed:  { card: 'border-primary bg-primary bg-opacity-10', text: 'text-primary', select: 'bg-primary text-white border-primary' },
-    Completed:  { card: 'border-secondary bg-light',               text: 'text-secondary', select: 'bg-secondary text-white border-secondary' },
-    Stopped:    { card: 'border-danger bg-danger bg-opacity-10',   text: 'text-danger', select: 'bg-danger text-white border-danger' },
-  };
+                      const statusStyles = {
+                        Active: { card: 'border-success bg-success bg-opacity-10', text: 'text-success', select: 'bg-success text-white border-success' },
+                        Dispensed: { card: 'border-primary bg-primary bg-opacity-10', text: 'text-primary', select: 'bg-primary text-white border-primary' },
+                        Completed: { card: 'border-secondary bg-light', text: 'text-secondary', select: 'bg-secondary text-white border-secondary' },
+                        Stopped: { card: 'border-danger bg-danger bg-opacity-10', text: 'text-danger', select: 'bg-danger text-white border-danger' },
+                      };
 
-  const style = statusStyles[status] || statusStyles.Completed; // fallback for any unexpected value
+                      const style = statusStyles[status] || statusStyles.Completed;
 
-  return (
-    <div key={rx.id} className={`p-3 rounded-4 border ${style.card}`}>
-      <div className="d-flex justify-content-between align-items-start mb-2">
-        <h6 className={`fw-bold mb-0 ${style.text}`}>{rx.medicine_name}</h6>
-        <select
-          className={`form-select form-select-sm w-auto fw-bold ${style.select}`}
-          value={rx.status}
-          onChange={(e) => handleUpdateStatus(rx.id, e.target.value)}
-        >
-          <option value="Active">Active</option>
-          <option value="Dispensed">Dispensed</option>
-          <option value="Completed">Completed</option>
-          <option value="Stopped">Stopped</option>
-        </select>
-      </div>
-      <p className="small text-dark mb-2 fw-medium">{rx.dosage}</p>
-      <div className="d-flex justify-content-between text-muted" style={{ fontSize: '0.75rem' }}>
-        <span>Dr. {rx.doctor_name}</span>
-        <span>{new Date(rx.created_at).toLocaleDateString()}</span>
-      </div>
-    </div>
-  );
-})}
+                      return (
+                        <div key={rx.id} className={`p-3 rounded-4 border ${style.card}`}>
+                          <div className="d-flex justify-content-between align-items-start mb-2">
+                            <h6 className={`fw-bold mb-0 ${style.text}`}>{rx.medicine_name}</h6>
+                            <HoverTooltip text={STATUS_EXPLANATIONS[status] || ''} placement="left">
+                              <select
+                                className={`form-select form-select-sm w-auto fw-bold ${style.select}`}
+                                value={rx.status}
+                                onChange={(e) => handleUpdateStatus(rx.id, e.target.value)}
+                              >
+                                <option value="Active">Active</option>
+                                <option value="Dispensed">Dispensed</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Stopped">Stopped</option>
+                              </select>
+                            </HoverTooltip>
+                          </div>
+                          <p className="small text-dark mb-2 fw-medium">{rx.dosage}</p>
+                          <div className="d-flex justify-content-between text-muted" style={{ fontSize: '0.75rem' }}>
+                            <span>Dr. {rx.doctor_name}</span>
+                            <span>{new Date(rx.created_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -231,19 +299,21 @@ const handlePrescribe = async (e) => {
             {/* Lab Reports Card */}
             <div className="card shadow-sm border-0 rounded-4">
               <div className="card-body p-4">
-                <h5 className="fw-bold text-dark mb-3 border-bottom pb-2">Lab Reports</h5>
+                <h5 className="fw-bold text-dark mb-3 border-bottom pb-2 d-flex align-items-center gap-2">
+                  <span className="bg-primary bg-opacity-10 text-primary p-1 rounded-circle d-inline-flex" style={{ fontSize: '0.9rem' }}>📚</span>
+                  Lab Reports
+                </h5>
                 {reports.length === 0 ? (
                   <p className="text-muted small mb-0">No lab reports found.</p>
                 ) : (
-                  <div className="d-flex flex-column gap-2">
+                  <div className="d-flex flex-column gap-2" style={{ maxHeight: '420px', overflowY: 'auto' }}>
                     {reports.map(report => (
-                      <div key={report.id} className="d-flex justify-content-between align-items-center p-2 bg-light rounded-3 border">
-                        <div className="text-truncate px-2">
-                          <h6 className="mb-0 fw-bold text-dark text-truncate small">{report.file_name}</h6>
-                          <small className="text-muted" style={{ fontSize: '0.75rem' }}>{new Date(report.uploaded_at).toLocaleDateString()}</small>
-                        </div>
-                        <a href={`http://localhost:5000/uploads/${report.file_path}`} target="_blank" rel="noreferrer" className="btn btn-sm btn-outline-primary rounded-pill flex-shrink-0">View</a>
-                      </div>
+                      <ReportCard
+                        key={report.id}
+                        report={report}
+                        fileUrl={`http://localhost:5000/uploads/${report.file_path}`}
+                        compact
+                      />
                     ))}
                   </div>
                 )}
@@ -265,74 +335,73 @@ const handlePrescribe = async (e) => {
                 </div>
 
                 <form onSubmit={handlePrescribe}>
-                  
-                  {/* UPGRADED: AI Input Group for Medicine Name */}
+
+                  {/* AI Input Group for Medicine Name — checks run automatically as you type */}
                   <div className="mb-4">
                     <label className="form-label fw-bold text-dark">Medicine Name *</label>
                     <div className="input-group">
-                      <input 
-                        type="text" 
-                        className="form-control form-control-lg bg-light border-0 shadow-sm" 
-                        placeholder="e.g., Amoxicillin 500mg" 
-                        value={medicineName} 
-                        onChange={(e) => {
-                          setMedicineName(e.target.value);
-                          setAiWarning(null); 
-                        }} 
-                        required 
+                      <input
+                        type="text"
+                        className="form-control form-control-lg bg-light border-0 shadow-sm"
+                        placeholder="e.g., Amoxicillin 500mg"
+                        value={medicineName}
+                        onChange={(e) => setMedicineName(e.target.value)}
+                        required
                       />
-                      <button 
-                        type="button" 
-                        className="btn btn-dark fw-bold px-4" 
+                      <button
+                        type="button"
+                        className="btn btn-dark fw-bold px-4"
                         onClick={handleCheckInteraction}
                         disabled={isChecking || !medicineName}
                       >
-                        {isChecking ? 'Checking...' : 'AI Safety Check'}
+                        {isChecking ? 'Checking...' : 'Re-check'}
                       </button>
                     </div>
+                    {isChecking && !aiWarning && (
+                      <div className="small text-muted mt-2 fst-italic">Running automatic safety check...</div>
+                    )}
                     {aiWarning && (
                       <div className={`alert alert-${aiWarning.type} mt-2 py-2 small fw-bold shadow-sm animate__animated animate__headShake`}>
                         {aiWarning.text}
                       </div>
                     )}
                   </div>
-                  
-                 <div className="mb-4 bg-light p-3 rounded-4 border">
-    <label className="form-label fw-bold text-dark mb-3">Routine & Dosage *</label>
-    
-    {/* 🔥 The Fix: Side-by-side inputs for Amount and Days */}
-    <div className="d-flex gap-2 mb-3">
-        <input 
-            type="text" 
-            className="form-control border-0 shadow-sm" 
-            placeholder="Amount (e.g., 1 Tablet)" 
-            value={dosageForm.amount} 
-            onChange={(e) => setDosageForm({...dosageForm, amount: e.target.value})} 
-            required 
-        />
-        <input 
-            type="number" 
-            className="form-control border-0 shadow-sm" 
-            placeholder="No. of Days" 
-            value={dosageForm.days} 
-            onChange={(e) => setDosageForm({...dosageForm, days: e.target.value})} 
-            required 
-            min="1"
-        />
-    </div>
 
-    <div className="btn-group w-100 mb-3 shadow-sm" role="group">
-                      <input type="checkbox" className="btn-check" id="btnMorning" checked={dosageForm.morning} onChange={(e) => setDosageForm({...dosageForm, morning: e.target.checked})} />
+                  <div className="mb-4 bg-light p-3 rounded-4 border">
+                    <label className="form-label fw-bold text-dark mb-3">Routine & Dosage *</label>
+
+                    <div className="d-flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        className="form-control border-0 shadow-sm"
+                        placeholder="Amount (e.g., 1 Tablet)"
+                        value={dosageForm.amount}
+                        onChange={(e) => setDosageForm({ ...dosageForm, amount: e.target.value })}
+                        required
+                      />
+                      <input
+                        type="number"
+                        className="form-control border-0 shadow-sm"
+                        placeholder="No. of Days"
+                        value={dosageForm.days}
+                        onChange={(e) => setDosageForm({ ...dosageForm, days: e.target.value })}
+                        required
+                        min="1"
+                      />
+                    </div>
+
+                    <div className="btn-group w-100 mb-3 shadow-sm" role="group">
+                      <input type="checkbox" className="btn-check" id="btnMorning" checked={dosageForm.morning} onChange={(e) => setDosageForm({ ...dosageForm, morning: e.target.checked })} />
                       <label className="btn btn-outline-primary" htmlFor="btnMorning">🌅 Morning</label>
-                      <input type="checkbox" className="btn-check" id="btnAfternoon" checked={dosageForm.afternoon} onChange={(e) => setDosageForm({...dosageForm, afternoon: e.target.checked})} />
+                      <input type="checkbox" className="btn-check" id="btnAfternoon" checked={dosageForm.afternoon} onChange={(e) => setDosageForm({ ...dosageForm, afternoon: e.target.checked })} />
                       <label className="btn btn-outline-primary" htmlFor="btnAfternoon">☀️ Afternoon</label>
-                      <input type="checkbox" className="btn-check" id="btnNight" checked={dosageForm.night} onChange={(e) => setDosageForm({...dosageForm, night: e.target.checked})} />
+                      <input type="checkbox" className="btn-check" id="btnNight" checked={dosageForm.night} onChange={(e) => setDosageForm({ ...dosageForm, night: e.target.checked })} />
                       <label className="btn btn-outline-primary" htmlFor="btnNight">🌙 Night</label>
                     </div>
                     <div className="btn-group w-100 shadow-sm" role="group">
-                      <input type="radio" className="btn-check" id="btnBeforeFood" checked={dosageForm.meal === 'Before Food'} onChange={() => setDosageForm({...dosageForm, meal: 'Before Food'})} />
+                      <input type="radio" className="btn-check" id="btnBeforeFood" checked={dosageForm.meal === 'Before Food'} onChange={() => setDosageForm({ ...dosageForm, meal: 'Before Food' })} />
                       <label className="btn btn-outline-success" htmlFor="btnBeforeFood">🍽️ Before Food</label>
-                      <input type="radio" className="btn-check" id="btnAfterFood" checked={dosageForm.meal === 'After Food'} onChange={() => setDosageForm({...dosageForm, meal: 'After Food'})} />
+                      <input type="radio" className="btn-check" id="btnAfterFood" checked={dosageForm.meal === 'After Food'} onChange={() => setDosageForm({ ...dosageForm, meal: 'After Food' })} />
                       <label className="btn btn-outline-success" htmlFor="btnAfterFood">🍽️ After Food</label>
                     </div>
                   </div>

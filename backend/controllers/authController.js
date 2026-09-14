@@ -6,7 +6,15 @@ const sendEmail = require('../utils/sendEmail');
 exports.registerUser = async (req, res) => {
     try {
         const { name, email, password, role, license_number } = req.body;
-        
+
+        // Public self-registration is only allowed for these roles.
+        // Admin accounts must be created directly in the database, and
+        // Doctor accounts are created by an approved Hospital.
+        const allowedRegistrationRoles = ['Patient', 'Hospital', 'Pharmacist'];
+        if (!allowedRegistrationRoles.includes(role)) {
+            return res.status(400).json({ message: 'That role cannot be self-registered.' });
+        }
+
         // Safely handle missing files or licenses for Patients
         const licenseFile = req.file ? req.file.filename : null;
         const safeLicenseNumber = license_number || null;
