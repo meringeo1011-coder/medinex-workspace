@@ -72,28 +72,67 @@ function DoctorDashboard() {
   const [aiWarning, setAiWarning] = useState(null);
   const [isChecking, setIsChecking] = useState(false);
 
+  const [recentPatients, setRecentPatients] = useState([]);
+
   const token = localStorage.getItem('token');
   const headers = { Authorization: `Bearer ${token}` };
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
+  // Recent patients = people this doctor has prescribed to (from the server)
+  // merged with patients they have opened recently (kept in this browser).
+  const loadRecent = async () => {
+    let fromServer = [];
+    try {
+      const res = await axios.get('http://localhost:5000/api/doctor/recent-patients', { headers });
+      fromServer = res.data.map(p => ({ id: p.id, name: p.name, patient_unique_id: p.patient_unique_id, at: p.last_visit }));
+    } catch (err) { console.error(err); }
+    let local;
+    try { local = JSON.parse(localStorage.getItem('medinex_recent_patients') || '[]'); } catch { local = []; }
+    const merged = new Map();
+    [...fromServer, ...local].forEach(p => {
+      const prev = merged.get(p.patient_unique_id);
+      if (!prev || new Date(p.at) > new Date(prev.at)) merged.set(p.patient_unique_id, p);
+    });
+    setRecentPatients([...merged.values()].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 8));
+  };
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  useEffect(() => { loadRecent(); }, []);
+
+  const rememberPatient = (p) => {
+    try {
+      const list = JSON.parse(localStorage.getItem('medinex_recent_patients') || '[]')
+        .filter(x => x.patient_unique_id !== p.patient_unique_id);
+      list.unshift({ id: p.id, name: p.name, patient_unique_id: p.patient_unique_id, at: new Date().toISOString() });
+      localStorage.setItem('medinex_recent_patients', JSON.stringify(list.slice(0, 8)));
+    } catch { /* ignore */ }
+    loadRecent();
+  };
+
+  const runSearch = async (rawId) => {
     setError('');
     setPatientData(null);
     setReports([]);
     setPrescriptions([]);
 
-    if (!searchId.trim()) return setError('Please enter a Patient ID.');
+    if (!rawId.trim()) return setError('Please enter a Patient ID.');
 
     try {
-      const formattedId = searchId.trim().toUpperCase();
+      const formattedId = rawId.trim().toUpperCase();
       const res = await axios.get(`http://localhost:5000/api/doctor/search-patient/${formattedId}`, { headers });
 
       setPatientData(res.data.profile);
       setReports(res.data.reports);
       setPrescriptions(res.data.prescriptions);
+      setSearchId(formattedId);
+      rememberPatient(res.data.profile);
     } catch (err) {
       setError(err.response?.data?.message || 'Patient not found or server error.');
     }
+  };
+
+  const handleSearch = (e) => {
+    e?.preventDefault?.();
+    return runSearch(searchId);
   };
 
   // AI Interaction + Allergy Check
@@ -159,7 +198,7 @@ function DoctorDashboard() {
       }, { headers });
 
       alert('Prescription successfully added to patient record! The patient has been notified.');
-      handleSearch(new Event('submit'));
+      runSearch(searchId);
 
       setMedicineName('');
       setInstructions('');
@@ -178,37 +217,59 @@ function DoctorDashboard() {
         { status: newStatus },
         { headers }
       );
-      handleSearch(new Event('submit'));
+      runSearch(searchId);
     } catch (err) {
       alert('Failed to update status.');
     }
   };
 
   return (
-    <div className="mt-4 text-start">
+    <div className="mx-container text-start">
 
-      {/* Doctor Header Card */}
-      <div className="card shadow-sm border-0 rounded-4 mb-4 text-white overflow-hidden" style={{ background: 'linear-gradient(135deg, var(--ink), var(--primary))' }}>
-        <div className="card-body p-4 p-md-5 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
-          <div>
-            <p className="mb-1 text-white-50 fw-semibold text-uppercase tracking-wider small">Clinical Portal</p>
-            <h2 className="fw-bold mb-0 text-white">Doctor Workspace</h2>
-            <p className="mb-0 text-white text-opacity-75">Search patients, review records, and prescribe medication.</p>
-          </div>
-          <div className="bg-white bg-opacity-10 p-3 rounded-4 border border-white border-opacity-25 text-md-end text-center shadow-sm">
-            <span className="d-block small text-white-50 text-uppercase fw-bold mb-2">Search Patient Record</span>
-            <form onSubmit={handleSearch} className="d-flex gap-2">
-              <input type="text" className="form-control fw-bold text-center rounded-pill" placeholder="e.g., PT-123456" value={searchId} onChange={(e) => setSearchId(e.target.value)} style={{ letterSpacing: '2px', textTransform: 'uppercase' }} />
-              <button type="submit" className="btn btn-light rounded-pill fw-bold text-primary px-4">Find</button>
-            </form>
-          </div>
+      {/* Doctor Header */}
+      <div className="mx-hero fade-in d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3">
+        <div>
+          <div className="eyebrow">Clinical portal</div>
+          <h2>Doctor workspace</h2>
+          <p className="sub">Search patients, review records, and prescribe safely.</p>
         </div>
+        <form onSubmit={handleSearch} className="mx-search">
+          <input type="text" placeholder="Patient ID — e.g. PT-123456" value={searchId} onChange={(e) => setSearchId(e.target.value)} aria-label="Patient ID" />
+          <button type="submit" className="mx-btn" style={{ background: '#fff', color: 'var(--primary-deep)' }}>Find patient</button>
+        </form>
       </div>
 
-      {error && <div className="alert alert-danger shadow-sm rounded-4 border-0 fw-bold d-flex align-items-center gap-2"><span className="fs-5">⚠️</span> {error}</div>}
+      {/* Recent patients: name + ID */}
+      <div className="mx-card mx-card-pad mb-4 fade-in">
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h5 className="mx-card-title mb-0">🕘 Recent patients</h5>
+            <p className="mx-card-sub mb-0">Tap a patient to reopen their record.</p>
+          </div>
+        </div>
+        {recentPatients.length === 0 ? (
+          <div className="mx-empty" style={{ padding: 20 }}>Patients you search or prescribe to will appear here.</div>
+        ) : (
+          <div className="mx-recent">
+            {recentPatients.map(p => (
+              <button key={p.patient_unique_id} className={`mx-recent-card ${patientData?.patient_unique_id === p.patient_unique_id ? 'on' : ''}`}
+                onClick={() => runSearch(p.patient_unique_id)}>
+                <span className="mx-avatar" style={{ width: 38, height: 38 }}>{(p.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}</span>
+                <span style={{ minWidth: 0 }}>
+                  <span className="nm d-block text-truncate">{p.name}</span>
+                  <span className="id d-block">{p.patient_unique_id}</span>
+                  <span className="dt d-block">{new Date(p.at).toLocaleDateString()}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {error && <div className="mx-alert danger">⚠️ {error}</div>}
 
       {patientData && (
-        <div className="row g-4 animate__animated animate__fadeIn">
+        <div className="row g-4 fade-in">
 
           {/* LEFT COLUMN: Patient Details, Reports & Medications */}
           <div className="col-lg-5 d-flex flex-column gap-4">

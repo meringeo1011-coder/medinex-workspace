@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import axios from 'axios';
 import { Link } from 'react-router-dom';
+import AuthShell from './AuthShell';
 
 function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -13,7 +14,6 @@ function ForgotPassword() {
     setMessage(null);
     setError(null);
     setIsLoading(true);
-
     try {
       const res = await axios.post('http://localhost:5000/api/auth/forgot-password', { email });
       setMessage({ type: 'success', text: res.data.message });
@@ -26,47 +26,23 @@ function ForgotPassword() {
   };
 
   return (
-    <div className="container mt-5">
-      <div className="row justify-content-center">
-        <div className="col-md-6 col-lg-5">
-          <div className="card shadow-sm border-0 rounded-4 p-4">
-            <h4 className="fw-bold text-center text-primary mb-3">Reset Password</h4>
-            <p className="text-muted text-center small mb-4">
-              Enter the email address associated with your account, and we will send you a link to reset your password.
-            </p>
-            
-            {message && <div className="alert alert-success py-2">{message.text}</div>}
-            {error && <div className="alert alert-danger py-2">{error}</div>}
-
-            <form onSubmit={handleSubmit}>
-              <div className="mb-4">
-                <input 
-                  type="email" 
-                  className="form-control bg-light py-2" 
-                  placeholder="Enter your email" 
-                  value={email} 
-                  onChange={(e) => setEmail(e.target.value)} 
-                  required 
-                />
-              </div>
-              <button 
-                type="submit" 
-                className="btn btn-primary w-100 rounded-pill fw-bold" 
-                disabled={isLoading}
-              >
-                {isLoading ? 'Sending...' : 'Send Reset Link'}
-              </button>
-            </form>
-            
-            <div className="text-center mt-4">
-              <Link to="/login" className="text-decoration-none text-secondary small fw-semibold">
-                Back to Login
-              </Link>
-            </div>
-          </div>
+    <AuthShell
+      title="Reset your password"
+      subtitle="Enter your account email and we'll send you a secure reset link."
+      footer={<Link to="/login">← Back to sign in</Link>}
+    >
+      {message && <div className="mx-alert success">{message.text}</div>}
+      {error && <div className="mx-alert danger">{error}</div>}
+      <form onSubmit={handleSubmit}>
+        <div className="mx-field">
+          <label className="mx-label">Email address</label>
+          <input type="email" className="mx-input" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
         </div>
-      </div>
-    </div>
+        <button type="submit" className="mx-btn mx-btn-primary mx-btn-block mx-btn-lg" disabled={isLoading}>
+          {isLoading ? 'Sending…' : 'Send reset link'}
+        </button>
+      </form>
+    </AuthShell>
   );
 }
 

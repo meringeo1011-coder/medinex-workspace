@@ -12,4 +12,6 @@ router.post('/add-prescription', authMiddleware, doctorController.addPrescriptio
 router.put('/update-prescription/:id', authMiddleware, doctorController.updatePrescriptionStatus);
 // Add this near your other doctor routes
 router.post('/check-interaction', authMiddleware, doctorController.checkInteraction);
+// Recent patients for the doctor workspace
+router.get('/recent-patients', authMiddleware, doctorController.getRecentPatients);
 module.exports = router;

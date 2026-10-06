@@ -67,6 +67,10 @@ exports.verifyOtpAndGetRecords = async (req, res) => {
         const patient = users[0];
         const now = new Date();
 
+        if (!patient) {
+            return res.status(404).json({ message: 'Patient not found.' });
+        }
+
         if (patient.current_otp !== otp || new Date(patient.otp_expires_at) < now) {
             return res.status(400).json({ message: 'Invalid or expired verification code.' });
         }
@@ -83,13 +87,29 @@ exports.verifyOtpAndGetRecords = async (req, res) => {
             ORDER BY p.created_at DESC
         `, [patient_id]);
 
+        // Recently bought medicines: everything the pharmacy has already dispensed
+        // to this patient (newest first), so the pharmacist can see purchase history.
+        const [purchases] = await db.execute(`
+            SELECT r.id, r.medicines_given, r.days_supplied, r.dispensed_at,
+                   p.medicine_name, p.dosage, p.status, p.duration_days,
+                   d.name AS doctor_name, ph.name AS pharmacist_name
+            FROM pharmacy_records r
+            JOIN prescriptions p ON r.prescription_id = p.id
+            JOIN users d ON p.doctor_id = d.id
+            LEFT JOIN users ph ON r.pharmacist_id = ph.id
+            WHERE p.patient_id = ?
+            ORDER BY r.dispensed_at DESC, r.id DESC
+            LIMIT 30
+        `, [patient_id]);
+
         // Clear the OTP from the database for security
         await db.execute('UPDATE users SET current_otp = NULL, otp_expires_at = NULL WHERE id = ?', [patient_id]);
 
         res.status(200).json({ 
             message: 'Access granted.', 
             allergies: patient.allergies,
-            prescriptions: prescriptions 
+            prescriptions: prescriptions,
+            purchases: purchases
         });
 
     } catch (error) {

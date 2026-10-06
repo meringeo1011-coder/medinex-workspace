@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
+const fmt = (d) => (d ? new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+
 function HospitalDashboard() {
   const [activeTab, setActiveTab] = useState('doctors');
   const [doctors, setDoctors] = useState([]);
@@ -61,29 +63,27 @@ function HospitalDashboard() {
   };
 
   return (
-    <div className="mt-2 text-start">
-      
-      {/* Upgraded Modern Pill Tabs */}
-      <ul className="nav nav-pills mb-4 gap-3 border-bottom pb-3">
-        <li className="nav-item">
-          <button 
-            className={`nav-link rounded-pill px-4 fw-bold ${activeTab === 'doctors' ? 'active shadow-sm' : 'text-muted hover-bg-light'}`} 
-            onClick={() => setActiveTab('doctors')}
-          >
-            Manage Doctors
-          </button>
-        </li>
-        <li className="nav-item">
-          <button 
-            className={`nav-link rounded-pill px-4 fw-bold ${activeTab === 'complaints' ? 'active bg-danger shadow-sm' : 'text-muted hover-bg-light'}`} 
-            onClick={() => setActiveTab('complaints')}
-          >
-            Patient Complaints
-          </button>
-        </li>
-      </ul>
+    <div className="mx-container text-start">
+      <div className="mx-hero fade-in d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3">
+        <div>
+          <div className="eyebrow">Hospital portal</div>
+          <h2>Hospital administration</h2>
+          <p className="sub">Manage your doctors and review patient complaints.</p>
+        </div>
+        <div className="d-flex gap-3">
+          <div className="mx-idbadge"><small>Doctors</small><strong>{doctors.length}</strong></div>
+          <div className="mx-idbadge"><small>Open complaints</small><strong>{complaints.filter(c => c.status !== 'Resolved').length}</strong></div>
+        </div>
+      </div>
 
-      {message && <div className={`alert alert-${message.type} shadow-sm rounded-3`}>{message.text}</div>}
+      <div className="mx-tabs">
+        <button className={`mx-tab ${activeTab === 'doctors' ? 'on' : ''}`} onClick={() => setActiveTab('doctors')}>🩺 Manage doctors</button>
+        <button className={`mx-tab ${activeTab === 'complaints' ? 'on' : ''}`} onClick={() => setActiveTab('complaints')}>
+          ⚑ Patient complaints{complaints.filter(c => c.status !== 'Resolved').length > 0 && <span className="count">{complaints.filter(c => c.status !== 'Resolved').length}</span>}
+        </button>
+      </div>
+
+      {message && <div className={`mx-alert ${message.type}`}>{message.text}</div>}
 
       {/* DOCTORS TAB */}
       {activeTab === 'doctors' && (
@@ -170,52 +170,80 @@ function HospitalDashboard() {
 
       {/* COMPLAINTS TAB */}
       {activeTab === 'complaints' && (
-        <div className="card shadow-sm border-0 rounded-4">
-          <div className="card-body p-4">
-            <h5 className="text-danger fw-bold mb-4">Patient Complaints Review</h5>
-            {complaints.length === 0 ? (
-              <div className="text-center p-5 bg-light rounded-4 text-muted">
-                No patient complaints reported.
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-hover align-middle mb-0">
-                  <thead className="table-light">
-                    <tr>
-                      <th className="text-uppercase text-secondary small fw-bold py-3 rounded-start">Date</th>
-                      <th className="text-uppercase text-secondary small fw-bold py-3">Patient</th>
-                      <th className="text-uppercase text-secondary small fw-bold py-3">Doctor Involved</th>
-                      <th className="text-uppercase text-secondary small fw-bold py-3">Complaint Details</th>
-                      <th className="text-uppercase text-secondary small fw-bold py-3">Status</th>
-                      <th className="text-uppercase text-secondary small fw-bold py-3 rounded-end text-end">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="border-top-0">
-                    {complaints.map(comp => (
-                      <tr key={comp.id}>
-                        <td className="text-muted py-3">{new Date(comp.created_at).toLocaleDateString()}</td>
-                        <td className="fw-bold py-3">{comp.patient_name}</td>
-                        <td className="py-3">{comp.doctor_name}</td>
-                        <td className="py-3 text-muted">{comp.complaint_text}</td>
-                        <td className="py-3">
-                          <span className={`badge rounded-pill px-3 py-2 ${comp.status === 'Resolved' ? 'bg-success' : comp.status === 'Reviewed' ? 'bg-warning text-dark' : 'bg-danger'}`}>
-                            {comp.status}
-                          </span>
-                        </td>
-                        <td className="text-end py-3">
-                          {comp.status !== 'Resolved' && (
-                            <button className="btn btn-sm btn-outline-success rounded-pill px-3 fw-semibold" onClick={() => handleResolveComplaint(comp.id, comp.status)}>
-                              {comp.status === 'Pending' ? 'Mark Reviewed' : 'Mark Resolved'}
-                            </button>
+        <div className="fade-in">
+          <h5 className="mx-card-title">Patient complaints</h5>
+          <p className="mx-card-sub">Each complaint arrives with the full details of the prescription it is about.</p>
+          {complaints.length === 0 ? (
+            <div className="mx-card mx-card-pad"><div className="mx-empty"><span className="big">🕊️</span>No patient complaints reported.</div></div>
+          ) : (
+            <div className="d-flex flex-column gap-3">
+              {complaints.map(comp => (
+                <div key={comp.id} className="mx-card mx-card-pad">
+                  {/* header: patient + status */}
+                  <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
+                    <div>
+                      <div className="fw-bold">{comp.patient_name}</div>
+                      <div className="small text-muted">
+                        {comp.patient_unique_id && <span className="mx-code-tag me-2">{comp.patient_unique_id}</span>}
+                        Filed {fmt(comp.created_at)}
+                      </div>
+                    </div>
+                    <span className={`mx-pill ${comp.status}`}>{comp.status}</span>
+                  </div>
+
+                  {/* prescription details */}
+                  <div style={{ background: '#f8fafc', border: '1px solid var(--line)', borderRadius: 14, padding: 16 }}>
+                    <div className="small fw-bold text-uppercase text-muted mb-2" style={{ letterSpacing: '.04em' }}>Prescription details</div>
+                    {comp.medicine_name ? (
+                      <div className="row g-3">
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Medicine</div><div className="fw-bold">💊 {comp.medicine_name}</div></div>
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Dosage</div><div className="fw-semibold">{comp.dosage || '—'}</div></div>
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Duration</div><div className="fw-semibold">{comp.duration_days ? `${comp.duration_days} days` : '—'}</div></div>
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Prescribed by</div><div className="fw-semibold">{comp.doctor_name}</div></div>
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Prescribed on</div><div className="fw-semibold">{fmt(comp.prescribed_on)}</div></div>
+                        <div className="col-sm-6 col-lg-3"><div className="small text-muted">Prescription status</div><div><span className={`mx-pill ${comp.prescription_status}`}>{comp.prescription_status}</span></div></div>
+                        <div className="col-sm-6 col-lg-3">
+                          <div className="small text-muted">Pharmacy</div>
+                          <div className="fw-semibold">{comp.dispensed_at ? `Dispensed ${fmt(comp.dispensed_at)}${comp.days_supplied ? ` (${comp.days_supplied} days)` : ''}` : 'Not dispensed yet'}</div>
+                        </div>
+                        <div className="col-12">
+                          {comp.patient_allergies ? (
+                            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '10px 14px' }}>
+                              <div className="small fw-bold text-danger">⚠️ Patient allergies</div>
+                              <div className="d-flex flex-wrap gap-2 mt-1">
+                                {comp.patient_allergies.split(/[\n,]+/).map(a => a.trim()).filter(Boolean).map((a, i) => (
+                                  <span key={i} className="mx-pill Stopped" style={{ fontSize: '.82rem' }}>{a}</span>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="mx-alert success mb-0">✅ No known allergies recorded for this patient.</div>
                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                        </div>
+                        {comp.instructions && (
+                          <div className="col-12"><div className="small text-muted">Instructions</div><div>📝 {comp.instructions}</div></div>
+                        )}
+                      </div>
+                    ) : <span className="text-muted">The linked prescription is no longer available.</span>}
+                  </div>
+
+                  {/* the complaint itself */}
+                  <div className="mt-3">
+                    <div className="small fw-bold text-uppercase text-muted mb-1" style={{ letterSpacing: '.04em' }}>Complaint</div>
+                    <p className="mb-0" style={{ color: 'var(--ink-soft)' }}>{comp.complaint_text}</p>
+                  </div>
+
+                  {comp.status !== 'Resolved' && (
+                    <div className="text-end mt-3">
+                      <button className="mx-btn mx-btn-soft" style={{ padding: '6px 14px', fontSize: '.8rem' }} onClick={() => handleResolveComplaint(comp.id, comp.status)}>
+                        {comp.status === 'Pending' ? 'Mark reviewed' : 'Mark resolved'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

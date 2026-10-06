@@ -24,7 +24,6 @@ router.get('/prescriptions', authMiddleware, patientController.getPatientPrescri
 router.post('/allergies', authMiddleware, patientController.updateAllergies);
 router.post('/upload-report', authMiddleware, upload.single('report'), patientController.uploadLabReport);
 router.get('/reports', authMiddleware, patientController.getLabReports);
-router.get('/hospitals', authMiddleware, patientController.getHospitalsList);
 router.post('/complaint', authMiddleware, patientController.submitComplaint);
 router.get('/my-complaints', authMiddleware, patientController.getMyComplaints);
 router.post('/ask-ai', authMiddleware, patientController.askAIAssistant);

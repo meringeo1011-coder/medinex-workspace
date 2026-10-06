@@ -1,46 +1,37 @@
 const db = require('../config/db');
 
-// Automatically flips a prescription's status to "Completed" once its
-// course of medicine is over. This now covers BOTH cases:
+// Automatically flips a prescription's status to "Completed" once its course
+// of medicine is over -- but ONLY if the pharmacy has actually dispensed it.
 //
-//   1. "Active" prescriptions that were never picked up from the pharmacy
-//      but have a doctor-entered duration_days that has elapsed.
-//   2. "Dispensed" prescriptions (the normal path: doctor -> pharmacist
-//      hands out the medicine) -- these complete based on days_supplied
-//      from the pharmacy_records row, counted from when it was dispensed.
-//      If no pharmacy_records row/days_supplied exists for some reason,
-//      it falls back to the prescription's own duration_days.
+// RULE: a prescription that was never picked up from the pharmacy must NOT
+// be marked Completed just because its duration_days passed. It stays
+// "Active" (i.e. prescribed, not yet collected) until the pharmacist
+// dispenses it. Once dispensed (status = 'Dispensed'), the course runs from
+// the dispensing time for `days_supplied` days, then becomes "Completed".
 //
-// This runs on every fetch (patient view, doctor view, pharmacist view),
-// so it also cleans up any already-existing "Dispensed"/"Active" rows in
-// the database the first time it runs after their course has ended --
-// nothing else needs to be done for existing data.
+// If no pharmacy_records row / days_supplied exists for a Dispensed
+// prescription, it falls back to duration_days counted from the dispense
+// record time (or, as a last resort, from the prescription date).
+//
+// Runs on every fetch (patient, doctor, pharmacist views), so existing
+// 'Dispensed' rows are cleaned up the first time they are read after the
+// course ends.
 async function autoCompleteExpiredPrescriptions() {
-    // 1. Active prescriptions whose duration has passed (never dispensed)
-    await db.execute(`
-        UPDATE prescriptions
-        SET status = 'Completed'
-        WHERE status = 'Active'
-          AND duration_days IS NOT NULL
-          AND DATE_ADD(created_at, INTERVAL duration_days DAY) <= NOW()
-    `);
-
-    // 2. Dispensed prescriptions whose supplied course has run out
     await db.execute(`
         UPDATE prescriptions p
-        LEFT JOIN (
-            SELECT prescription_id, dispensed_at, days_supplied
-            FROM pharmacy_records
-            WHERE id IN (
+        JOIN (
+            SELECT r.prescription_id, r.dispensed_at, r.days_supplied
+            FROM pharmacy_records r
+            WHERE r.id IN (
                 SELECT MAX(id) FROM pharmacy_records GROUP BY prescription_id
             )
         ) pr ON pr.prescription_id = p.id
         SET p.status = 'Completed'
         WHERE p.status = 'Dispensed'
-          AND (
-                (pr.days_supplied IS NOT NULL AND DATE_ADD(pr.dispensed_at, INTERVAL pr.days_supplied DAY) <= NOW())
-             OR (pr.prescription_id IS NULL AND p.duration_days IS NOT NULL AND DATE_ADD(p.created_at, INTERVAL p.duration_days DAY) <= NOW())
-          )
+          AND DATE_ADD(
+                pr.dispensed_at,
+                INTERVAL COALESCE(pr.days_supplied, p.duration_days, 0) DAY
+              ) <= NOW()
     `);
 }
 

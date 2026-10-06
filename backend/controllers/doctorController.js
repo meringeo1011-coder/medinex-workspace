@@ -152,3 +152,26 @@ exports.checkInteraction = async (req, res) => {
         res.status(500).json({ message: 'Failed to check interaction.' });
     }
 };
+
+// 5. Recent patients -- everyone this doctor has prescribed to, newest first,
+//    returned with BOTH name and patient ID so the doctor can reopen a record in one click.
+exports.getRecentPatients = async (req, res) => {
+    try {
+        const doctorId = req.user.userId || req.user.id;
+        const [rows] = await db.execute(`
+            SELECT u.id, u.name, u.patient_unique_id,
+                   MAX(p.created_at) AS last_visit,
+                   COUNT(p.id) AS prescription_count
+            FROM prescriptions p
+            JOIN users u ON u.id = p.patient_id
+            WHERE p.doctor_id = ? AND u.role = 'Patient'
+            GROUP BY u.id, u.name, u.patient_unique_id
+            ORDER BY last_visit DESC
+            LIMIT 12
+        `, [doctorId]);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Recent patients error:', error);
+        res.status(500).json({ message: 'Could not load recent patients.' });
+    }
+};

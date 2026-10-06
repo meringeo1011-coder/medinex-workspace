@@ -1,11 +1,24 @@
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import Logo from './Logo';
+
+const ROLE_ICON = { Patient: '🧑‍⚕️', Doctor: '🩺', Hospital: '🏥', Pharmacist: '💊', Admin: '🛡️' };
 
 function Navbar() {
   const navigate = useNavigate();
-  const location = useLocation(); // Forces the navbar to refresh when the page changes
+  const location = useLocation();
+  const [openPath, setOpenPath] = useState(null);
+  const open = openPath === location.pathname; // auto-closes on navigation
+  const [scrolled, setScrolled] = useState(false);
 
   const token = localStorage.getItem('token');
   const role = localStorage.getItem('role');
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const handleLogout = () => {
     localStorage.clear();
@@ -13,54 +26,32 @@ function Navbar() {
   };
 
   return (
-    <nav className="navbar navbar-expand-lg navbar-dark shadow-sm mb-4" style={{ background: 'var(--ink)' }}>
-      <div className="container-fluid px-4">
-        <Link className="navbar-brand fw-bold fs-4" to={token ? "/dashboard" : "/"}>
-          Medinex<span style={{ color: 'var(--teal)' }}>.</span>
-        </Link>
+    <header className={`mx-nav ${scrolled ? 'is-scrolled' : ''}`}>
+      <div className="mx-nav-inner">
+        <Link to={token ? '/dashboard' : '/'} aria-label="Medinex home"><Logo size={34} /></Link>
 
-        <div className="collapse navbar-collapse d-flex justify-content-end">
-          <ul className="navbar-nav align-items-center">
-            {/* If NO token exists, show Login/Register */}
-            {!token ? (
-              <>
-                <li className="nav-item me-2">
-                  <Link className="nav-link text-white-50" to="/">Home</Link>
-                </li>
-                <li className="nav-item me-2">
-                  <Link className="nav-link text-white-50" to="/login">Login</Link>
-                </li>
-                <li className="nav-item">
-                  <Link className="btn btn-light fw-bold rounded-pill px-4" style={{ color: 'var(--ink)' }} to="/register">
-                    Register
-                  </Link>
-                </li>
-              </>
-            ) : (
-              /* If token EXISTS, show Dashboard & Logout */
-              <>
-                <li className="nav-item me-4">
-                  <span className="navbar-text text-white-50">
-                    Signed in as: <span
-                      className="badge rounded-pill ms-1 fs-6 fw-medium"
-                      style={{ background: 'rgba(15,155,142,0.18)', color: 'var(--teal)', fontFamily: "'JetBrains Mono', monospace" }}
-                    >{role}</span>
-                  </span>
-                </li>
-                <li className="nav-item me-3">
-                  <Link className="nav-link text-white-50" to="/dashboard">Dashboard</Link>
-                </li>
-                <li className="nav-item">
-                  <button onClick={handleLogout} className="btn btn-danger rounded-pill px-4 shadow-sm">
-                    Logout
-                  </button>
-                </li>
-              </>
-            )}
-          </ul>
-        </div>
+        <button className="mx-nav-toggle" onClick={() => setOpenPath(open ? null : location.pathname)} aria-label="Toggle menu" aria-expanded={open}>
+          <span /><span /><span />
+        </button>
+
+        <nav className={`mx-nav-links ${open ? 'open' : ''}`}>
+          {!token ? (
+            <>
+              <NavLink to="/" end className="mx-nav-link">Home</NavLink>
+              <NavLink to="/login" className="mx-nav-link">Login</NavLink>
+              <Link to="/register" className="mx-btn mx-btn-primary">Get started</Link>
+            </>
+          ) : (
+            <>
+              <NavLink to="/" end className="mx-nav-link">Home</NavLink>
+              <NavLink to="/dashboard" className="mx-nav-link">Dashboard</NavLink>
+              <span className="mx-role-chip"><span>{ROLE_ICON[role] || '👤'}</span>{role}</span>
+              <button onClick={handleLogout} className="mx-btn mx-btn-ghost-dark">Log out</button>
+            </>
+          )}
+        </nav>
       </div>
-    </nav>
+    </header>
   );
 }
 
