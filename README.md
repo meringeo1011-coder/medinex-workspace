@@ -58,13 +58,27 @@ cd medinex-workspace
 
 ### 2. Set up the database
 
-Create the database and import the schema:
+Import the schema (creates the `medinex_db` database and all tables):
 
-```sql
-CREATE DATABASE medinex_db;
+```bash
+mysql -u root -p < database.sql
 ```
 
-Then import your SQL schema file into `medinex_db`. <!-- TODO: add the schema file name/path if you have one -->
+Or open phpMyAdmin → **Import** → choose `database.sql`.
+
+Then create an admin account. From the `backend` folder, generate a password hash:
+
+```bash
+node -e "console.log(require('bcrypt').hashSync('YourStrongPassword', 10))"
+```
+
+and run this in MySQL, pasting the hash:
+
+```sql
+USE medinex_db;
+INSERT INTO users (name, email, password, role, is_active, approval_status, is_email_verified)
+VALUES ('Admin', 'admin@example.com', '<PASTE_HASH_HERE>', 'Admin', 1, 'Approved', 1);
+```
 
 ### 3. Configure environment variables
 
