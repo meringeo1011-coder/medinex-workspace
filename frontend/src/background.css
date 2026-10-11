@@ -1,0 +1,131 @@
+/* ===========================================================
+   MEDINEX BACKGROUND LAYER  (load last, after polish.css)
+   One dark, low-poly "medical network" backdrop behind every page:
+   glowing mesh, medical crosses, capsules and a heartbeat line.
+   Cards stay white so all text remains easy to read.
+=========================================================== */
+html,
+body {
+  background: #040c26 url('./assets/app-bg.svg') center / cover no-repeat fixed;
+}
+#root { background: transparent; }
+
+/* ---------- Header: dark glass ---------- */
+.mx-nav { background: rgba(4, 12, 38, 0.72); }
+.mx-nav.is-scrolled { border-color: rgba(140, 190, 255, 0.22); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35); }
+.mx-nav .mx-logo-word { color: #fff; }
+.mx-nav .mx-nav-link { color: #cfe0ff; }
+.mx-nav .mx-nav-link:hover,
+.mx-nav .mx-nav-link.active { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.mx-nav .mx-btn-ghost-dark { color: #fff; border-color: rgba(255, 255, 255, 0.32); }
+.mx-nav .mx-btn-ghost-dark:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.5); }
+.mx-nav .mx-role-chip { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.22); color: #fff; }
+.mx-nav-toggle span { background: #fff; }
+@media (max-width: 768px) {
+  .mx-nav-links { background: #07122f; border-color: rgba(140, 190, 255, 0.22); }
+}
+
+/* ---------- Page content ---------- */
+/* Banner: give it an edge so it doesn't melt into the dark backdrop */
+.mx-hero { border: 1px solid rgba(140, 200, 255, 0.28); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4); }
+
+/* Cards: crisp white, lifted off the dark background */
+.mx-card { box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28); border-color: rgba(255, 255, 255, 0.6); }
+
+/* Headings / helper text that sit DIRECTLY on the background turn light.
+   Anything inside a white surface keeps its normal dark colour. */
+.mx-container :is(h1, h2, h3, h4, h5, h6, p, .mx-card-title, .mx-card-sub, .mx-hint, .text-muted, .small, small):not(:is(.mx-card, .card, .mx-hero, .mx-empty, .mx-tabs, .mx-alert, .mx-stat, .mx-toast, .table-responsive, .modal, [class*="ph-"], [class*="ad-"]) *) {
+  color: #e6eefc !important;
+}
+.mx-container :is(.mx-card-sub, .mx-hint, .text-muted, .small, small):not(:is(.mx-card, .card, .mx-hero, .mx-empty, .mx-tabs, .mx-alert, .mx-stat, .mx-toast, .table-responsive, .modal, [class*="ph-"], [class*="ad-"]) *) {
+  color: #a9bbdc !important;
+}
+
+/* ---------- Login / register / reset ---------- */
+.mx-auth-main { background: transparent; }
+.mx-auth-card {
+  background: rgba(255, 255, 255, 0.92);
+
+  /* Frosted glass effect */
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+
+  /* Soft border */
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 26px;
+
+  padding: 42px 40px;
+
+  /* More realistic depth */
+  box-shadow:
+    0 25px 70px rgba(0, 0, 0, 0.35),
+    0 8px 25px rgba(0, 0, 0, 0.12);
+
+  /* Subtle separation from background */
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle highlight at the top of the card */
+.mx-auth-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    #3b82f6,
+    #60a5fa,
+    #22d3ee
+  );
+  opacity: 0.9;
+}
+
+/* Mobile */
+@media (max-width: 560px) {
+  .mx-auth-card {
+    padding: 32px 22px;
+    border-radius: 22px;
+  }
+}
+@media (max-width: 560px) { .mx-auth-card { padding: 28px 20px; } }
+
+
+/* ---------- Blurred background ---------- */
+html,
+body {
+  position: relative;
+  background: #040c26;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: -20px;
+  background: url('./assets/app-bg.svg') center / cover no-repeat;
+  filter: blur(8px);
+  transform: scale(1.05);
+  z-index: -1;
+  pointer-events: none;
+}
+
+#root {
+  position: relative;
+  z-index: 0;
+  background: transparent;
+}
+
+/* ---------- Full-width layout ---------- */
+.mx-container {
+  max-width: none;
+  width: 100%;
+  padding-left: clamp(16px, 3vw, 56px);
+  padding-right: clamp(16px, 3vw, 56px);
+}
+.mx-nav-inner {
+  max-width: none;
+  padding-left: clamp(16px, 3vw, 56px);
+  padding-right: clamp(16px, 3vw, 56px);
+}

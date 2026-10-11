@@ -6,7 +6,7 @@ exports.addDoctor = async (req, res) => {
     try {
         // Grab the logged-in Hospital's ID
         const hospitalId = req.user.userId || req.user.id;
-const { name, email, password, license_number = null } = req.body;
+const { name, email, password, license_number = null, specialization = null } = req.body;
         // 1. Verify the Hospital is actually approved before they can add doctors
         const [hospitalCheck] = await db.execute('SELECT approval_status FROM users WHERE id = ?', [hospitalId]);
         if (hospitalCheck[0].approval_status !== 'Approved') {
@@ -26,9 +26,9 @@ const { name, email, password, license_number = null } = req.body;
         // 4. Insert the Doctor, automatically linking them to this hospital_id
         await db.execute(
             `INSERT INTO users 
-            (name, email, password, role, is_active, approval_status, license_number, hospital_id) 
-            VALUES (?, ?, ?, 'Doctor', true, 'Approved', ?, ?)`,
-            [name, email, hashedPassword, license_number, hospitalId]
+            (name, email, password, role, is_active, approval_status, license_number, hospital_id, specialization) 
+            VALUES (?, ?, ?, 'Doctor', true, 'Approved', ?, ?, ?)`,
+            [name, email, hashedPassword, license_number, hospitalId, specialization]
         );
 
         res.status(201).json({ message: 'Doctor successfully added to your hospital network!' });
@@ -43,7 +43,7 @@ exports.getHospitalDoctors = async (req, res) => {
     try {
         const hospitalId = req.user.userId || req.user.id;
         const [doctors] = await db.execute(
-            'SELECT id, name, email, license_number, is_active FROM users WHERE hospital_id = ? AND role = "Doctor"',
+            'SELECT id, name, email, license_number, specialization, is_active FROM users WHERE hospital_id = ? AND role = "Doctor"',
             [hospitalId]
         );
         res.status(200).json(doctors);
@@ -66,21 +66,27 @@ exports.removeDoctor = async (req, res) => {
     }
 };
 
-// Get Patient Complaints for this Hospital (UPDATED WITH PATIENT NAME)
+// Get Patient Complaints for this Hospital -- each one comes with the full
+// details of the prescription it is about.
 exports.getComplaints = async (req, res) => {
     try {
         const hospitalId = req.user.userId || req.user.id;
-        
-        // Using JOIN to get the patient's name from the users table
+
         const [complaints] = await db.execute(
-            `SELECT c.*, u.name AS patient_name 
-             FROM complaints c 
-             JOIN users u ON c.patient_id = u.id 
-             WHERE c.hospital_id = ? 
+            `SELECT c.id, c.prescription_id, c.doctor_name, c.complaint_text, c.status, c.created_at,
+                    u.name AS patient_name, u.patient_unique_id, u.allergies AS patient_allergies,
+                    p.medicine_name, p.dosage, p.duration_days, p.instructions,
+                    p.status AS prescription_status, p.created_at AS prescribed_on,
+                    (SELECT MAX(r.dispensed_at) FROM pharmacy_records r WHERE r.prescription_id = p.id) AS dispensed_at,
+                    (SELECT r.days_supplied FROM pharmacy_records r WHERE r.prescription_id = p.id ORDER BY r.id DESC LIMIT 1) AS days_supplied
+             FROM complaints c
+             JOIN users u ON c.patient_id = u.id
+             LEFT JOIN prescriptions p ON c.prescription_id = p.id
+             WHERE c.hospital_id = ?
              ORDER BY c.created_at DESC`,
             [hospitalId]
         );
-        
+
         res.status(200).json(complaints);
     } catch (error) {
         console.error("Error fetching complaints:", error);

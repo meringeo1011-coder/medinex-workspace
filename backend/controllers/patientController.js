@@ -1,6 +1,6 @@
 const db = require('../config/db');
 const fs = require('fs');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateAI } = require('../utils/aiService');
 const { autoCompleteExpiredPrescriptions } = require('../utils/prescriptionUtils');
 
 // 1. Get Profile
@@ -23,9 +23,18 @@ exports.getPatientPrescriptions = async (req, res) => {
     try {
         const userId = req.user.userId || req.user.id;
         await autoCompleteExpiredPrescriptions();
+        // hospital_id / hospital_name come from the prescribing doctor's hospital,
+        // so a complaint can be routed to the right hospital automatically.
         const [prescriptions] = await db.execute(`
-            SELECT p.id, p.medicine_name, p.dosage, p.instructions, p.status, p.hospital_name, p.created_at, u.name AS doctor_name 
-            FROM prescriptions p JOIN users u ON p.doctor_id = u.id WHERE p.patient_id = ? ORDER BY p.created_at DESC
+            SELECT p.id, p.medicine_name, p.dosage, p.instructions, p.status, p.created_at, p.duration_days,
+                   p.doctor_id, u.name AS doctor_name,
+                   u.hospital_id, h.name AS hospital_name,
+                   (SELECT MAX(r.dispensed_at) FROM pharmacy_records r WHERE r.prescription_id = p.id) AS dispensed_at,
+                   (SELECT r.days_supplied FROM pharmacy_records r WHERE r.prescription_id = p.id ORDER BY r.id DESC LIMIT 1) AS days_supplied
+            FROM prescriptions p
+            JOIN users u ON p.doctor_id = u.id
+            LEFT JOIN users h ON h.id = u.hospital_id AND h.role = 'Hospital'
+            WHERE p.patient_id = ? ORDER BY p.created_at DESC
         `, [userId]);
         res.status(200).json(prescriptions);
     } catch (error) {
@@ -57,23 +66,13 @@ exports.uploadLabReport = async (req, res) => {
 
         try {
             const fileBuffer = fs.readFileSync(req.file.path);
-            const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-            const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
-            const result = await model.generateContent([
-                {
-                    inlineData: {
-                        data: fileBuffer.toString('base64'),
-                        mimeType: req.file.mimetype
-                    }
-                },
-                {
-                    text: 'You are a clinical assistant. Read this medical/lab document and write a short, plain-language summary (max 100 words) for the patient: what the document is, key results, and anything flagged as abnormal. If you cannot read the file content, say so plainly.'
-                }
-            ]);
-            summary = result.response.text().trim();
+            const result = await generateAI(
+                'Read this medical/lab document and write a plain-language summary of at most 100 words. Explain key results and abnormal flags. Do not invent values or diagnose. If unreadable, say so. Remind the patient to discuss results with their clinician.',
+                { buffer: fileBuffer, mimeType: req.file.mimetype }
+            );
+            summary = result.text;
         } catch (aiError) {
-            console.error("Report summarization failed:", aiError.message);
+            console.warn("Report summary unavailable.");
             summary = 'Automatic summary unavailable for this file.';
         }
 
@@ -102,54 +101,75 @@ exports.getLabReports = async (req, res) => {
     }
 };
 
-// 6. Get Hospitals List for Complaints
-exports.getHospitalsList = async (req, res) => {
-    try {
-        const [hospitals] = await db.execute('SELECT id, name FROM users WHERE role = "Hospital" AND approval_status = "Approved"');
-        res.status(200).json(hospitals);
-    } catch (error) {
-        console.error("Error fetching hospitals:", error);
-        res.status(500).json({ message: 'Failed to load hospitals.' });
-    }
-};
-
-// 7. Submit Complaint
+// 7. Submit Complaint -- raised about one of the patient's OWN prescriptions.
+//    The hospital and doctor are NOT sent by the browser: they are looked up from
+//    the prescription (prescription -> doctor -> hospital), so a complaint always
+//    reaches the hospital that issued it.
 exports.submitComplaint = async (req, res) => {
     try {
         const patientId = req.user.userId || req.user.id;
-        const { hospital_id, doctor_name, complaint_text } = req.body;
+        const { prescription_id, complaint_text } = req.body;
 
-        if (!hospital_id || !doctor_name || !complaint_text) {
-            return res.status(400).json({ message: 'Please fill in all fields.' });
+        if (!prescription_id || !complaint_text || !complaint_text.trim()) {
+            return res.status(400).json({ message: 'Please choose a prescription and describe the issue.' });
         }
 
+        // Prescription must belong to this patient; fetch its doctor + hospital
+        const [rx] = await db.execute(
+            `SELECT p.id, u.name AS doctor_name, u.hospital_id, h.name AS hospital_name
+             FROM prescriptions p
+             JOIN users u ON u.id = p.doctor_id
+             LEFT JOIN users h ON h.id = u.hospital_id AND h.role = 'Hospital'
+             WHERE p.id = ? AND p.patient_id = ?`,
+            [prescription_id, patientId]
+        );
+        if (rx.length === 0) {
+            return res.status(403).json({ message: 'You can only file a complaint about your own prescriptions.' });
+        }
+        if (!rx[0].hospital_id || !rx[0].hospital_name) {
+            return res.status(400).json({ message: 'The doctor who wrote this prescription is not linked to a hospital yet, so the complaint cannot be routed.' });
+        }
+
+        // Stop the same prescription being reported twice while still open
+        const [dupes] = await db.execute(
+            'SELECT id FROM complaints WHERE patient_id = ? AND prescription_id = ? AND status <> "Resolved"',
+            [patientId, prescription_id]
+        );
+        if (dupes.length > 0) {
+            return res.status(409).json({ message: 'You already have an open complaint for this prescription.' });
+        }
+
+        const [me] = await db.execute('SELECT name FROM users WHERE id = ?', [patientId]);
+
         await db.execute(
-            'INSERT INTO complaints (patient_id, hospital_id, doctor_name, complaint_text, status) VALUES (?, ?, ?, ?, "Pending")',
-            [patientId, hospital_id, doctor_name, complaint_text]
+            'INSERT INTO complaints (patient_id, patient_name, hospital_id, prescription_id, doctor_name, complaint_text, status) VALUES (?, ?, ?, ?, ?, ?, "Pending")',
+            [patientId, me[0]?.name || '', rx[0].hospital_id, prescription_id, rx[0].doctor_name, complaint_text.trim()]
         );
 
-        res.status(201).json({ message: 'Complaint submitted successfully. The hospital administration has been notified.' });
+        res.status(201).json({ message: `Complaint submitted. ${rx[0].hospital_name} has been notified.` });
     } catch (error) {
         console.error("Complaint Error:", error);
         res.status(500).json({ message: 'Failed to submit complaint.' });
     }
 };
 
-// 8. Get Patient Complaints
+// 8. Get Patient Complaints (with the prescription each one is about)
 exports.getMyComplaints = async (req, res) => {
     try {
         const patientId = req.user.userId || req.user.id;
         const [complaints] = await db.execute(
-            `SELECT c.*, u.name AS hospital_name 
-             FROM complaints c 
-             JOIN users u ON c.hospital_id = u.id 
-             WHERE c.patient_id = ? 
+            `SELECT c.id, c.hospital_id, c.prescription_id, c.doctor_name, c.complaint_text, c.status, c.created_at,
+                    u.name AS hospital_name, p.medicine_name, p.created_at AS prescribed_on
+             FROM complaints c
+             JOIN users u ON c.hospital_id = u.id
+             LEFT JOIN prescriptions p ON c.prescription_id = p.id
+             WHERE c.patient_id = ?
              ORDER BY c.created_at DESC`,
             [patientId]
         );
         res.status(200).json(complaints);
     } catch (error) {
-        console.error("DEBUG: Error fetching patient complaints:", error);
+        console.error("Error fetching patient complaints:", error);
         res.status(500).json({ message: 'Failed to load your complaints.' });
     }
 };
@@ -157,12 +177,10 @@ exports.getMyComplaints = async (req, res) => {
 // 9. Medinex AI Assistant Chatbot
 exports.askAIAssistant = async (req, res) => {
     try {
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
         const { question, patientContext } = req.body;
 
-        if (!question) return res.status(400).json({ message: 'Question required.' });
+        if (typeof question !== 'string' || !question.trim() || question.length > 4000) return res.status(400).json({ message: 'Question required.' });
 
-        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
         const prompt = `
         You are "Medinex Assistant", a helpful, empathetic, and professional AI embedded in a patient's healthcare portal. 
         
@@ -177,11 +195,11 @@ exports.askAIAssistant = async (req, res) => {
         3. STRICT RULE: You are not a doctor. If they ask for a diagnosis, politely tell them to consult their doctor.
         `;
 
-        const result = await model.generateContent(prompt);
-        res.status(200).json({ reply: result.response.text() });
+        const result = await generateAI(prompt);
+        res.status(200).json({ reply: result.text, provider: result.provider });
 
     } catch (error) {
-        console.error("AI Chatbot Error:", error);
-        res.status(500).json({ message: 'AI Assistant is currently resting. Try again later.' });
+        console.warn("Both AI providers unavailable.");
+        res.status(503).json({ message: 'Both AI services are currently unavailable. Please try again later.' });
     }
 };

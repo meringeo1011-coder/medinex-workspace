@@ -52,6 +52,11 @@ app.get('/api/dashboard/data', authMiddleware, (req, res) => {
     });
 });
 
+app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    res.status(400).json({ message: err.code === 'LIMIT_FILE_SIZE' ? 'Report must be under 4 MB.' : 'Request could not be processed. Check the file type and try again.' });
+});
+
 // 6. Server Initialization
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

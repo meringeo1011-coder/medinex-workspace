@@ -3,13 +3,19 @@ const router = express.Router();
 const hospitalController = require('../controllers/hospitalController');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// Doctor Management Routes (Matches your new frontend exactly)
-router.get('/doctors', authMiddleware, hospitalController.getHospitalDoctors);
-router.post('/doctors', authMiddleware, hospitalController.addDoctor); 
-router.delete('/doctors/:id', authMiddleware, hospitalController.removeDoctor);
+// Every route below requires a valid token, and only Hospital accounts may use them
+router.use(authMiddleware, (req, res, next) => {
+  if (req.user.role !== 'Hospital') {
+    return res.status(403).json({ message: 'Hospitals only.' });
+  }
+  next();
+});
 
-// Complaints Management Routes
-router.get('/complaints', authMiddleware, hospitalController.getComplaints);
-router.put('/complaints/:id/status', authMiddleware, hospitalController.updateComplaintStatus);
+router.get('/doctors', hospitalController.getHospitalDoctors);
+router.post('/doctors', hospitalController.addDoctor);
+router.delete('/doctors/:id', hospitalController.removeDoctor);
+
+router.get('/complaints', hospitalController.getComplaints);
+router.put('/complaints/:id/status', hospitalController.updateComplaintStatus);
 
 module.exports = router;

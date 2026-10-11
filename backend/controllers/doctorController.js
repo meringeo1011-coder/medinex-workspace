@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { generateAI } = require('../utils/aiService');
 const { autoCompleteExpiredPrescriptions } = require('../utils/prescriptionUtils');
 const sendEmail = require('../utils/sendEmail');
 
@@ -45,14 +45,27 @@ exports.searchPatient = async (req, res) => {
 // 2. Write a New Prescription (now notifies the patient by email)
 exports.addPrescription = async (req, res) => {
     try {
-        const doctorId = req.user.userId || req.user.id;
+        // Identity and hospital come from the verified doctor record (doctorMiddleware),
+        // never from the request body.
+        const doctorId = req.doctor.id;
+        const hospitalName = req.doctor.hospital_name;
         const { patient_id, medicine_name, dosage, instructions, duration_days } = req.body;
 
-        const hospitalName = "Medinex Partner Network";
+        if (!patient_id || !medicine_name?.trim() || !dosage?.trim()) {
+            return res.status(400).json({ message: 'Patient, medicine name and dosage are required.' });
+        }
+        const days = duration_days === undefined || duration_days === null || duration_days === '' ? null : Number(duration_days);
+        if (days !== null && (!Number.isInteger(days) || days < 1)) {
+            return res.status(400).json({ message: 'Duration must be a whole number of days.' });
+        }
+
+        // Prescriptions can only be written to a real patient record
+        const [target] = await db.execute('SELECT id FROM users WHERE id = ? AND role = "Patient"', [patient_id]);
+        if (target.length === 0) return res.status(404).json({ message: 'Patient not found.' });
 
         await db.execute(
             'INSERT INTO prescriptions (patient_id, doctor_id, medicine_name, dosage, duration_days, instructions, status, hospital_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [patient_id, doctorId, medicine_name, dosage, duration_days || null, instructions, 'Active', hospitalName]
+            [patient_id, doctorId, medicine_name.trim(), dosage.trim(), days, instructions || null, 'Active', hospitalName]
         );
 
         // Notify the patient that a new prescription was added
@@ -88,12 +101,21 @@ exports.addPrescription = async (req, res) => {
 exports.updatePrescriptionStatus = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body; // 'Active', 'Completed', or 'Stopped'
+        const { status } = req.body;
 
-        await db.execute(
-            'UPDATE prescriptions SET status = ? WHERE id = ?',
-            [status, id]
+        if (!['Active', 'Dispensed', 'Completed', 'Stopped'].includes(status)) {
+            return res.status(400).json({ message: 'Invalid status.' });
+        }
+
+        // A doctor may only change prescriptions issued by their own hospital
+        const [result] = await db.execute(
+            `UPDATE prescriptions p JOIN users d ON d.id = p.doctor_id
+             SET p.status = ? WHERE p.id = ? AND d.hospital_id = ?`,
+            [status, id, req.doctor.hospital_id]
         );
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: 'Prescription not found for your hospital.' });
+        }
 
         res.status(200).json({ message: `Medication marked as ${status}.` });
     } catch (error) {
@@ -125,8 +147,6 @@ exports.checkInteraction = async (req, res) => {
             });
         }
 
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
         const prompt = `
     Act as a strict clinical pharmacist.
@@ -138,17 +158,40 @@ exports.checkInteraction = async (req, res) => {
     If there is an allergy conflict, interaction, or duplicate therapy warning, reply with a brief 1-2 sentence warning explaining the risk. Do not write a long essay.
 `;
 
-        const result = await model.generateContent(prompt);
-        const aiResponse = result.response.text().trim();
+        const result = await generateAI(prompt);
+        const aiResponse = result.text.trim();
 
-        if (aiResponse.toUpperCase().includes('SAFE') && aiResponse.length < 10) {
+        if (aiResponse.toUpperCase() === 'SAFE') {
             res.status(200).json({ status: 'safe', message: 'No major interactions or allergy conflicts detected.' });
         } else {
             res.status(200).json({ status: 'warning', message: aiResponse });
         }
 
     } catch (error) {
-        console.error("AI Checker Error:", error);
-        res.status(500).json({ message: 'Failed to check interaction.' });
+        console.warn("AI medicine screening unavailable.");
+        res.status(503).json({ status: 'unavailable', message: 'AI screening unavailable. A clinician must review this prescription; it has not been marked safe.' });
+    }
+};
+
+// 5. Recent patients -- everyone this doctor has prescribed to, newest first,
+//    returned with BOTH name and patient ID so the doctor can reopen a record in one click.
+exports.getRecentPatients = async (req, res) => {
+    try {
+        const doctorId = req.user.userId || req.user.id;
+        const [rows] = await db.execute(`
+            SELECT u.id, u.name, u.patient_unique_id,
+                   MAX(p.created_at) AS last_visit,
+                   COUNT(p.id) AS prescription_count
+            FROM prescriptions p
+            JOIN users u ON u.id = p.patient_id
+            WHERE p.doctor_id = ? AND u.role = 'Patient'
+            GROUP BY u.id, u.name, u.patient_unique_id
+            ORDER BY last_visit DESC
+            LIMIT 12
+        `, [doctorId]);
+        res.status(200).json(rows);
+    } catch (error) {
+        console.error('Recent patients error:', error);
+        res.status(500).json({ message: 'Could not load recent patients.' });
     }
 };
